@@ -425,17 +425,33 @@ class AgentLoop:
 Respond with ONLY valid JSON, no markdown fences."""
 
         try:
-            response = await self.provider.chat(
-                messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Respond only with valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
-                model=self.model,
-            )
-            text = (response.content or "").strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            result = json.loads(text)
+            messages = [
+                {"role": "system", "content": "You are a memory consolidation agent. Respond only with valid JSON."},
+                {"role": "user", "content": prompt},
+            ]
+
+            async def _get_result_with_retry() -> dict:
+                # Retry once if model returns empty/non-JSON text.
+                for attempt in range(2):
+                    response = await self.provider.chat(messages=messages, model=self.model)
+                    text = (response.content or "").strip()
+                    if text.startswith("```"):
+                        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                    if not text:
+                        if attempt == 0:
+                            logger.warning("Memory consolidation got empty model response, retrying once...")
+                            continue
+                        raise ValueError("empty model response")
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError:
+                        if attempt == 0:
+                            logger.warning("Memory consolidation got non-JSON response, retrying once...")
+                            continue
+                        raise
+                raise ValueError("unable to parse consolidation response")
+
+            result = await _get_result_with_retry()
 
             if entry := result.get("history_entry"):
                 memory.append_history(entry)
@@ -448,6 +464,13 @@ Respond with ONLY valid JSON, no markdown fences."""
             logger.info(f"Memory consolidation done, session trimmed to {len(session.messages)} messages")
         except Exception as e:
             logger.error(f"Memory consolidation failed: {e}")
+            # Fail-soft: still trim the session window to avoid repeated
+            # consolidation attempts on every incoming message.
+            try:
+                session.messages = session.messages[-keep_count:] if keep_count else []
+                self.sessions.save(session)
+            except Exception as trim_err:
+                logger.warning(f"Memory consolidation fallback trim failed: {trim_err}")
 
     async def process_direct(
         self,
