@@ -1,6 +1,7 @@
 """Base channel interface for chat platforms."""
 
 from abc import ABC, abstractmethod
+from collections import deque
 from typing import Any
 
 from loguru import logger
@@ -30,6 +31,7 @@ class BaseChannel(ABC):
         self.config = config
         self.bus = bus
         self._running = False
+        self._recent_chat_ids: deque[str] = deque(maxlen=20)
     
     @abstractmethod
     async def start(self) -> None:
@@ -109,6 +111,8 @@ class BaseChannel(ABC):
                 f"Add them to allowFrom list in config to grant access."
             )
             return
+
+        self._remember_chat_id(str(chat_id))
         
         msg = InboundMessage(
             channel=self.name,
@@ -120,6 +124,20 @@ class BaseChannel(ABC):
         )
         
         await self.bus.publish_inbound(msg)
+
+    def _remember_chat_id(self, chat_id: str) -> None:
+        """Record recent chat IDs for graceful shutdown notifications."""
+        if not chat_id:
+            return
+        try:
+            self._recent_chat_ids.remove(chat_id)
+        except ValueError:
+            pass
+        self._recent_chat_ids.append(chat_id)
+
+    def get_recent_chat_ids(self) -> list[str]:
+        """Get recent chat IDs seen by this channel (oldest -> newest)."""
+        return list(self._recent_chat_ids)
     
     @property
     def is_running(self) -> bool:

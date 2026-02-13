@@ -165,7 +165,9 @@ class ChannelManager:
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""
         logger.info("Stopping all channels...")
-        
+
+        await self._notify_channels_going_offline()
+
         # Stop dispatcher
         if self._dispatch_task:
             self._dispatch_task.cancel()
@@ -181,6 +183,24 @@ class ChannelManager:
                 logger.info(f"Stopped {name} channel")
             except Exception as e:
                 logger.error(f"Error stopping {name}: {e}")
+
+    async def _notify_channels_going_offline(self) -> None:
+        """Best-effort broadcast to recent chats before shutdown."""
+        notice = "nanobot is going offline now and will rest for a while. Send a new message after I restart."
+
+        for name, channel in self.channels.items():
+            recent_chat_ids = channel.get_recent_chat_ids()
+            if not recent_chat_ids:
+                continue
+            for chat_id in recent_chat_ids:
+                try:
+                    await channel.send(OutboundMessage(
+                        channel=name,
+                        chat_id=chat_id,
+                        content=notice,
+                    ))
+                except Exception as e:
+                    logger.debug(f"Shutdown notice failed for {name}:{chat_id}: {e}")
     
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
