@@ -331,6 +331,7 @@ def gateway(
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_search_max_results=config.tools.web.search.max_results,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -383,15 +384,20 @@ def gateway(
     console.print(f"[green]✓[/green] Heartbeat: every 30m")
     
     async def run():
+        started = False
         try:
             await cron.start()
             await heartbeat.start()
+            started = True
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
             )
-        except KeyboardInterrupt:
-            console.print("\nShutting down...")
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
+        finally:
+            if started:
+                console.print("\nShutting down...")
             heartbeat.stop()
             cron.stop()
             agent.stop()
@@ -438,6 +444,7 @@ def agent(
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_search_max_results=config.tools.web.search.max_results,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
     )
