@@ -423,15 +423,16 @@ class AgentLoop:
 Respond with ONLY valid JSON, no markdown fences."""
 
         try:
-            messages = [
-                {"role": "system", "content": "You are a memory consolidation agent. Respond only with valid JSON."},
-                {"role": "user", "content": prompt},
-            ]
-
             async def _get_result_with_retry() -> dict[str, Any]:
                 # Retry once if model returns empty/non-JSON text.
                 for attempt in range(2):
-                    response = await self.provider.chat(messages=messages, model=self.model)
+                    response = await self.provider.chat(
+                        messages=[
+                            {"role": "system", "content": "You are a memory consolidation agent. Respond only with valid JSON."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        model=self.model,
+                    )
                     text = (response.content or "").strip()
                     if text.startswith("```"):
                         text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
