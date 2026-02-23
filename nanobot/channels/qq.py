@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 from collections import deque
+from collections import defaultdict
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -58,6 +59,8 @@ class QQChannel(BaseChannel):
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
+        # QQ C2C de-duplicates by (msg_id, msg_seq). Keep a per-conversation seq.
+        self._msg_seq: dict[tuple[str, str], int] = defaultdict(int)
 
     async def start(self) -> None:
         """Start the QQ bot."""
@@ -146,11 +149,14 @@ class QQChannel(BaseChannel):
             return
         try:
             reply_msg_id = msg.reply_to or str(msg.metadata.get("message_id", "") or "")
+            seq_key = (msg.chat_id, reply_msg_id or "__proactive__")
+            self._msg_seq[seq_key] += 1
             await self._client.api.post_c2c_message(
                 openid=msg.chat_id,
                 msg_type=0,
                 content=msg.content,
                 msg_id=reply_msg_id,
+                msg_seq=self._msg_seq[seq_key],
             )
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
